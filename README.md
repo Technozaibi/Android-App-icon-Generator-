@@ -1,1 +1,0 @@
-# Android-App-icon-Generator-
