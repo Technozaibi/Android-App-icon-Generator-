@@ -12,7 +12,8 @@
   "dependencies": {
     "lucide-react": "^0.292.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "jszip": "^3.10.1"  // <-- ADD THIS LINE
   },
   "devDependencies": {
     "@types/react": "^18.2.37",
