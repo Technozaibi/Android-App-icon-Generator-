@@ -1,24 +1,25 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Sliders, Save, Palette } from 'lucide-react';
-import JSZip from 'jszip'; // <-- IMPORT JSZip HERE
-import { saveAs } from 'file-saver'; // <-- Optionally add this for better save dialog support
+import JSZip from 'jszip';
 
 // Main App component
 const App = () => {
-  // ... (all your existing state, refs, and constants)
+  // State variables
   const [imageSrc, setImageSrc] = useState(null);
   const [padding, setPadding] = useState(10);
-  const [backgroundColor, setBackgroundColor] = useState('#2d3748');
-  const [isTransparent, setIsTransparent] = useState(false);
+  const [backgroundColor, setBackgroundColor] = useState('#2d3748'); // Default dark gray color
+  const [isTransparent, setIsTransparent] = useState(false); // New state for transparent background
   const [exportFormat, setExportFormat] = useState('png');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isImageSelected, setIsImageSelected] = useState(false);
+
+  // References to the canvas elements
   const squareCanvasRef = useRef(null);
   const roundCanvasRef = useRef(null);
   const circleCanvasRef = useRef(null);
   const fileInputRef = useRef(null);
-  
+
   // Constants for icon sizes and names
   const ICON_SIZES = {
     'mipmap-xxxhdpi': 192,
@@ -42,31 +43,41 @@ const App = () => {
     ctx.arcTo(x, y, x + radius, y, radius);
     ctx.closePath();
   };
-  
+
   // Function to draw the image on a canvas with a specified shape and padding
   const drawIcon = useCallback((canvas, image, shape, size, padding, bgColor, isTransparent) => {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, size, size);
 
+    // Only fill the background if the transparent option is NOT selected
     if (!isTransparent) {
       ctx.fillStyle = bgColor;
       ctx.fillRect(0, 0, size, size);
     }
+
+    // Explicitly cast padding to a number for calculation
     const numericPadding = Number(padding);
     const paddedSize = size - (numericPadding * 2);
     const startX = numericPadding;
     const startY = numericPadding;
+
+    // Save the context state before clipping
     ctx.save();
+
+    // Create the clipping path based on the shape
     if (shape === 'circle') {
       ctx.beginPath();
       ctx.arc(size / 2, size / 2, paddedSize / 2, 0, Math.PI * 2);
       ctx.closePath();
       ctx.clip();
     } else if (shape === 'round') {
+      // For the squircle shape, we use a rounded rectangle
       drawRoundedRect(ctx, startX, startY, paddedSize, paddedSize, paddedSize / 4);
       ctx.closePath();
       ctx.clip();
     }
+
+    // Draw the image to fit the padded area, preserving aspect ratio
     const imgWidth = image.width;
     const imgHeight = image.height;
     const ratio = Math.max(paddedSize / imgWidth, paddedSize / imgHeight);
@@ -74,15 +85,20 @@ const App = () => {
     const newHeight = imgHeight * ratio;
     const offsetX = startX + (paddedSize - newWidth) / 2;
     const offsetY = startY + (paddedSize - newHeight) / 2;
+
     ctx.drawImage(image, offsetX, offsetY, newWidth, newHeight);
+
+    // Restore the context state
     ctx.restore();
   }, []);
 
+  // Effect to re-draw the previews whenever the image, padding, or background color changes
   useEffect(() => {
     if (imageSrc) {
       const image = new Image();
       image.src = imageSrc;
       image.onload = () => {
+        // Draw previews for the main view (at xxxhdpi size)
         drawIcon(squareCanvasRef.current, image, 'square', ICON_SIZES['mipmap-xxxhdpi'], padding, backgroundColor, isTransparent);
         drawIcon(roundCanvasRef.current, image, 'round', ICON_SIZES['mipmap-xxxhdpi'], padding, backgroundColor, isTransparent);
         drawIcon(circleCanvasRef.current, image, 'circle', ICON_SIZES['mipmap-xxxhdpi'], padding, backgroundColor, isTransparent);
@@ -90,6 +106,7 @@ const App = () => {
     }
   }, [imageSrc, padding, backgroundColor, isTransparent, drawIcon]);
 
+  // Handle file selection
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -104,6 +121,7 @@ const App = () => {
     }
   };
 
+  // Trigger file input click
   const handleUploadClick = () => {
     fileInputRef.current.click();
   };
@@ -125,6 +143,8 @@ const App = () => {
       const mimeType = format === 'png' ? 'image/png' : 'image/webp';
       const fileExtension = format === 'png' ? 'png' : 'webp';
 
+      const promises = [];
+
       // Loop through each folder size
       Object.entries(ICON_SIZES).forEach(([folderName, size]) => {
         // Create a temporary canvas for this specific icon size
@@ -132,7 +152,7 @@ const App = () => {
         tempCanvas.width = size;
         tempCanvas.height = size;
 
-        // Generate and download the three shapes
+        // Generate the three shapes
         const shapes = [
           { name: 'ic_launcher_foreground', shape: 'square' },
           { name: 'ic_launcher_round', shape: 'circle' },
@@ -142,35 +162,38 @@ const App = () => {
         shapes.forEach(({ name, shape }) => {
           drawIcon(tempCanvas, image, shape, size, padding, backgroundColor, isTransparent);
           // Get the image data as a Blob
-          tempCanvas.toBlob((blob) => {
-            // Add the blob to the zip file with the correct folder structure
-            zip.folder(folderName).file(`${name}.${fileExtension}`, blob);
-          }, mimeType);
+          promises.push(
+            new Promise(resolve => {
+              tempCanvas.toBlob(blob => {
+                // Add the blob to the zip file with the correct folder structure
+                zip.folder(folderName).file(`${name}.${fileExtension}`, blob);
+                resolve();
+              }, mimeType);
+            })
+          );
         });
       });
 
-      // After all images are added, generate and download the zip file
-      // Use a timeout to ensure all blobs are added before generating the zip
-      setTimeout(() => {
+      // Wait for all blobs to be generated and added to the zip
+      Promise.all(promises).then(() => {
+        // Generate the zip file and trigger the download
         zip.generateAsync({ type: "blob" })
           .then(function (content) {
-            // Use file-saver library for better download behavior
-            // Or use a simple a tag if file-saver is not used
+            // Use a simple a tag for download
             const a = document.createElement('a');
             a.href = URL.createObjectURL(content);
             a.download = 'android_icons.zip';
             a.click();
-
+            
             // Revoke the blob URL to free up memory
             URL.revokeObjectURL(a.href);
             setIsDownloading(false);
           });
-      }, 500); // Small delay to ensure all promises are resolved
+      });
     };
   };
 
   return (
-    // ... (Your JSX remains the same)
     <div className="min-h-screen bg-gray-900 text-gray-100 p-4 sm:p-8 flex flex-col items-center justify-center font-sans">
       <div className="w-full max-w-4xl bg-gray-800 rounded-2xl shadow-2xl p-6 sm:p-10 border border-gray-700">
         <h1 className="text-3xl sm:text-4xl font-bold text-center mb-6 text-indigo-400">
